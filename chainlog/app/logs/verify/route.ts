@@ -1,57 +1,68 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import { getReaderContract } from '@/lib/contract';
-import { generateSHA256Hash, hexToBytes32 } from '@/lib/hash';
-import { ethers } from 'ethers';
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { findRecord } from "@/lib/ledger";
+import crypto from "crypto";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  let body: { recordId: string; logContent: unknown };
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
 
-  const { recordId, logContent } = body;
+    if (!file) {
+      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+    }
 
-  if (!recordId || !logContent) {
-    return NextResponse.json(
-      { error: 'recordId and logContent are required' },
-      { status: 400 },
-    );
-  }
+    // Read the file contents as text (it should be a JSON log file)
+    const text = await file.text();
 
-  try {
-    const contract = getReaderContract();
-    const record = await contract.getRecord(recordId);
+    // Parse and re-stringify with the same format used when storing
+    // to get a deterministic hash
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return NextResponse.json({ error: "File is not valid JSON" }, { status: 400 });
+    }
 
-    const onChainHash: string = record.fileHash;
+    // Compute SHA-256 of the canonical JSON (same as hashBatch does)
+    const canonical = JSON.stringify(parsed);
+    const fileHash = crypto.createHash("sha256").update(canonical).digest("hex");
 
-    const currentHexHash = generateSHA256Hash(logContent);
-    const currentBytes32Hash = hexToBytes32(currentHexHash);
+    // Look up in local ledger
+    const record = findRecord(fileHash);
 
-    const tampered = onChainHash.toLowerCase() !== currentBytes32Hash.toLowerCase();
-
-    return NextResponse.json({
-      tampered,
-      onChainHash,
-      currentHash: currentBytes32Hash,
-      record: {
+    if (record) {
+      return NextResponse.json({
+        verified: true,
+        tampered: false,
         fileName: record.fileName,
+        fileHash,
+        storedHash: record.fileHash,
+        timestamp: record.timestamp,
         machineId: record.machineId,
+        entries: record.entries,
+        onChain: record.onChain,
+        txHash: record.txHash,
         owner: record.owner,
-        timestamp: Number(record.timestamp),
-      },
-    });
+        message: "✅ File is authentic — hash matches the stored record.",
+      });
+    } else {
+      // Not found in ledger — either tampered or never stored
+      // Also return the hash so the user can see what was computed
+      return NextResponse.json({
+        verified: false,
+        tampered: true,
+        fileHash,
+        message:
+          "❌ No matching record found. This file may have been tampered with or was never stored.",
+      });
+    }
   } catch (err) {
-    console.error('[API/verify] Error:', err);
-    return NextResponse.json({ error: 'Failed to verify log' }, { status: 500 });
+    console.error("[verify] Error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
