@@ -1,40 +1,67 @@
-export interface LogRecord {
+import { TelemetryEntry, HealthState } from '@/lib/telemetry';
+
+export type { TelemetryEntry, HealthState };
+
+export interface TelemetryBatch {
+  machineId: string;
+  fileName: string;
+  sessionStart: string;
+  entries: TelemetryEntry[];
+}
+
+export interface OnChainRecord {
   recordId: string;
   fileHash: string;
-  timestamp: string;
   fileName: string;
   machineId: string;
   owner: string;
+  timestamp: number;
 }
 
 export interface StoreLogRequest {
-  logContent: string;
+  logContent: unknown;
   fileName: string;
   machineId: string;
-  timestamp: number;
 }
 
 export interface StoreLogResponse {
   success: boolean;
   txHash: string;
   fileHash: string;
-  timestamp: number;
   fileName: string;
   machineId: string;
 }
 
 export interface VerifyLogRequest {
   recordId: string;
-  logContent: string;
+  logContent: unknown;
 }
 
 export interface VerifyLogResponse {
-  recordId: string;
-  storedHash: string;
-  recomputedHash: string;
   tampered: boolean;
-  fileName: string;
-  machineId: string;
-  timestamp: string;
-  owner: string;
+  onChainHash: string;
+  currentHash: string;
+  record: {
+    fileName: string;
+    machineId: string;
+    owner: string;
+    timestamp: number;
+  };
+}
+
+export interface FetchLogsResponse {
+  records: OnChainRecord[];
+}
+
+export interface EngineStatus {
+  running: boolean;
+  pendingEntries: number;
+  sessionStart: string;
+}
+
+export interface ManualFlushResponse {
+  message: string;
+  fileName?: string;
+  entries?: number;
+  hash?: string;
 }
