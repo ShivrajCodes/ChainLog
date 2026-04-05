@@ -1,0 +1,75 @@
+[
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "bytes32", "name": "recordId", "type": "bytes32" },
+      { "indexed": true, "internalType": "address", "name": "owner", "type": "address" },
+      { "indexed": false, "internalType": "bytes32", "name": "fileHash", "type": "bytes32" },
+      { "indexed": false, "internalType": "uint256", "name": "timestamp", "type": "uint256" }
+    ],
+    "name": "LogStored",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "getMyRecords",
+    "outputs": [{ "internalType": "bytes32[]", "name": "", "type": "bytes32[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "bytes32", "name": "_recordId", "type": "bytes32" }],
+    "name": "getRecord",
+    "outputs": [
+      {
+        "components": [
+          { "internalType": "bytes32", "name": "fileHash", "type": "bytes32" },
+          { "internalType": "uint256", "name": "timestamp", "type": "uint256" },
+          { "internalType": "string", "name": "fileName", "type": "string" },
+          { "internalType": "string", "name": "machineId", "type": "string" },
+          { "internalType": "address", "name": "owner", "type": "address" }
+        ],
+        "internalType": "struct LogIntegrity.LogRecord",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
+    "name": "records",
+    "outputs": [
+      { "internalType": "bytes32", "name": "fileHash", "type": "bytes32" },
+      { "internalType": "uint256", "name": "timestamp", "type": "uint256" },
+      { "internalType": "string", "name": "fileName", "type": "string" },
+      { "internalType": "string", "name": "machineId", "type": "string" },
+      { "internalType": "address", "name": "owner", "type": "address" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "_fileHash", "type": "bytes32" },
+      { "internalType": "uint256", "name": "_timestamp", "type": "uint256" },
+      { "internalType": "string", "name": "_fileName", "type": "string" },
+      { "internalType": "string", "name": "_machineId", "type": "string" }
+    ],
+    "name": "storeLog",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "", "type": "address" },
+      { "internalType": "uint256", "name": "", "type": "uint256" }
+    ],
+    "name": "userRecords",
+    "outputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]
