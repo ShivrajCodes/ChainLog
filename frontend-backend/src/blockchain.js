@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import abi from './abi/contractABI.json';
+import { toBytes32 } from './utils/hash';
 
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 
@@ -45,10 +46,10 @@ export async function connectWallet() {
 }
 
 /**
- * Stores a log on-chain. The new contract expects:
- *   storeLog(bytes32 _fileHash, uint256 _timestamp, string _fileName, string _machineId)
+ * Stores a log on-chain.
+ * Converts the SHA-256 hex hash to bytes32 via keccak256 before sending.
  *
- * @param {string} hashHex - SHA-256 hex string (64 chars, no 0x prefix expected)
+ * @param {string} hashHex - SHA-256 hex string from generateHash()
  * @param {number} timestamp - Unix epoch in seconds
  * @param {string} fileName - Name of the telemetry file
  * @param {string} machineId - Identifier for the machine/sensor
@@ -60,11 +61,10 @@ export async function storeLogOnChain(hashHex, timestamp, fileName, machineId, s
 
   const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, signer);
 
-  // Convert hex hash to bytes32 — ethers expects 0x-prefixed 32-byte hex
-  const fileHashBytes32 = '0x' + hashHex.padStart(64, '0');
+  const fileHashBytes = toBytes32(hashHex);
   const ts = BigInt(timestamp);
 
-  const tx = await contract.storeLog(fileHashBytes32, ts, fileName, machineId);
+  const tx = await contract.storeLog(fileHashBytes, ts, fileName, machineId);
   console.log("Transaction sent:", tx.hash);
 
   await tx.wait();
@@ -74,16 +74,11 @@ export async function storeLogOnChain(hashHex, timestamp, fileName, machineId, s
 
 /**
  * Retrieves a specific record by its recordId from on-chain storage.
- *
- * @param {string} recordIdHex - Hex record ID (bytes32)
- * @param {ethers.Provider} provider - Ethers provider
- * @returns {Object} The LogRecord struct { fileHash, timestamp, fileName, machineId, owner }
  */
 export async function getRecordFromChain(recordIdHex, provider) {
   if (!provider) throw new Error("Provider not available");
 
   const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, provider);
-
   const record = await contract.getRecord(recordIdHex);
 
   return {
@@ -97,25 +92,22 @@ export async function getRecordFromChain(recordIdHex, provider) {
 
 /**
  * Retrieves all record IDs belonging to the connected wallet.
- *
- * @param {ethers.Signer} signer - Connected wallet signer
- * @returns {string[]} Array of bytes32 record IDs
  */
 export async function getMyRecordsFromChain(signer) {
   if (!signer) throw new Error("Wallet not connected");
 
   const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, signer);
-
   const recordIds = await contract.getMyRecords();
   return recordIds;
 }
 
 /**
  * Verifies file integrity by:
- * 1. Getting all the caller's record IDs
- * 2. Fetching each record and comparing fileHash against the provided hash
+ * 1. Converting the SHA-256 hash to bytes32 (same as storage)
+ * 2. Getting all the caller's record IDs
+ * 3. Fetching each record and comparing fileHash
  *
- * @param {string} hashHex - SHA-256 hex string of the file to verify
+ * @param {string} hashHex - SHA-256 hex string from generateHash()
  * @param {ethers.Signer} signer - Connected wallet signer
  * @returns {Object} { isAuthentic: bool, matchedRecord: LogRecord | null }
  */
@@ -123,7 +115,7 @@ export async function verifyFileIntegrity(hashHex, signer) {
   if (!signer) throw new Error("Wallet not connected");
 
   const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, signer);
-  const fileHashBytes32 = '0x' + hashHex.padStart(64, '0');
+  const fileHashBytes = toBytes32(hashHex);
 
   // Fetch the caller's record IDs
   const recordIds = await contract.getMyRecords();
@@ -131,7 +123,7 @@ export async function verifyFileIntegrity(hashHex, signer) {
   for (const recordId of recordIds) {
     const record = await contract.getRecord(recordId);
 
-    if (record.fileHash === fileHashBytes32) {
+    if (record.fileHash === fileHashBytes) {
       return {
         isAuthentic: true,
         matchedRecord: {

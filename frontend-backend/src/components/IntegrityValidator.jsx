@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Card from './Card';
-import { generateSHA256Hash } from '../utils/hash';
+import { generateHash } from '../utils/hash';
 import { verifyFileIntegrity } from '../blockchain';
 
 const VALIDATION_STATES = {
@@ -16,13 +16,17 @@ const VALIDATION_STATES = {
   },
 };
 
-function IntegrityValidator({ signer }) {
+function IntegrityValidator({ signer, user }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [result, setResult] = useState(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const handleVerify = async () => {
+    if (!user) {
+      setErrorMessage('Please login with Google first to verify integrity.');
+      return;
+    }
     if (!selectedFile) {
       setErrorMessage('Please select a JSON telemetry file first.');
       return;
@@ -39,8 +43,8 @@ function IntegrityValidator({ signer }) {
     try {
       const text = await selectedFile.text();
       const jsonData = JSON.parse(text);
-      const computedHash = await generateSHA256Hash(jsonData);
-      
+      const computedHash = await generateHash(jsonData);
+
       const { isAuthentic, matchedRecord } = await verifyFileIntegrity(computedHash, signer);
 
       setResult({
@@ -49,6 +53,7 @@ function IntegrityValidator({ signer }) {
         fileName: isAuthentic ? matchedRecord.fileName : null,
         machineId: isAuthentic ? matchedRecord.machineId : null,
         recordTimestamp: isAuthentic ? new Date(matchedRecord.timestamp * 1000).toISOString() : null,
+        verifiedBy: user.email,
         status: isAuthentic ? 'AUTHENTIC' : 'TAMPERED',
       });
     } catch (err) {
@@ -67,11 +72,11 @@ function IntegrityValidator({ signer }) {
         <p className="text-sm uppercase tracking-[0.35em] text-cyan-300/80">
           File Integrity check
         </p>
-        <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
+        <h2 className="mt-3 text-3xl font-semibold tracking-tight text-theme-text sm:text-5xl">
           Validate the authenticity of exported telemetry logs.
         </h2>
-        <p className="mt-4 text-base leading-7 text-slate-300">
-          Upload a previously exported JSON record to check for potential 
+        <p className="mt-4 text-base leading-7 text-theme-muted">
+          Upload a previously exported JSON record to check for potential
           data tampering or corruption during transit.
         </p>
       </div>
@@ -82,8 +87,8 @@ function IntegrityValidator({ signer }) {
           subtitle="Select a local .json file for cryptographic verification."
           className="h-full"
         >
-          <label className="block rounded-3xl border border-dashed border-white/15 bg-slate-950/80 p-6 transition hover:border-cyan-300/35">
-            <span className="text-xs uppercase tracking-[0.28em] text-slate-500">
+          <label className="block rounded-3xl border border-dashed border-theme-border/15 bg-theme-surface/80 p-6 transition hover:border-cyan-300/35">
+            <span className="text-xs uppercase tracking-[0.28em] text-theme-subtle">
               Source JSON File
             </span>
             <input
@@ -94,13 +99,13 @@ function IntegrityValidator({ signer }) {
                 setResult(null);
                 setErrorMessage('');
               }}
-              className="mt-4 block w-full cursor-pointer rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-xs text-slate-300 file:mr-4 file:rounded-full file:border-0 file:bg-cyan-400/10 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-cyan-200 hover:file:bg-cyan-400/20"
+              className="mt-4 block w-full cursor-pointer rounded-2xl border border-theme-border/10 bg-theme-surface px-4 py-3 text-xs text-theme-muted file:mr-4 file:rounded-full file:border file:border-theme-text/80 file:bg-theme-accent-blue/10 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-theme-accent-blue-text hover:file:bg-theme-accent-blue/20"
             />
           </label>
 
-          <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/70 p-4 text-sm text-slate-300">
-            <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">File Handle</p>
-            <p className="mt-2 font-mono text-xs text-white truncate">
+          <div className="mt-5 rounded-2xl border border-theme-border/10 bg-theme-surface/70 p-4 text-sm text-theme-muted">
+            <p className="text-[10px] uppercase tracking-[0.25em] text-theme-subtle">File Handle</p>
+            <p className="mt-2 font-mono text-xs text-theme-text truncate">
               {selectedFile ? selectedFile.name : 'No selection'}
             </p>
           </div>
@@ -115,7 +120,7 @@ function IntegrityValidator({ signer }) {
             type="button"
             onClick={handleVerify}
             disabled={isVerifying}
-            className="mt-6 inline-flex w-full items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-400/10 px-5 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-cyan-100 transition hover:bg-cyan-400/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="mt-6 inline-flex w-full items-center justify-center rounded-full border border-theme-text/80 bg-theme-accent-blue/10 px-5 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-theme-accent-blue-text transition hover:bg-theme-accent-blue/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isVerifying ? 'Running hash check...' : 'Verify Authenticity'}
           </button>
@@ -131,57 +136,66 @@ function IntegrityValidator({ signer }) {
               <p className={`text-[10px] font-bold uppercase tracking-[0.4em] ${activeStyle.label}`}>
                 {result.status}
               </p>
-              <h3 className="mt-3 text-xl font-semibold text-white">{activeStyle.message}</h3>
+              <h3 className="mt-3 text-xl font-semibold text-theme-text">{activeStyle.message}</h3>
 
               <div className="mt-6 grid gap-4">
-                <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
-                  <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">On-Chain Hash</p>
-                  <p className="mt-2 break-all font-mono text-[11px] text-slate-400">
+                <div className="rounded-2xl border border-theme-border/5 bg-theme-surface/20 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.25em] text-theme-subtle">On-Chain Hash</p>
+                  <p className="mt-2 break-all font-mono text-[11px] text-theme-muted">
                     {result.originalHash || 'N/A'}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
-                  <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">Computed File Hash</p>
-                  <p className="mt-2 break-all font-mono text-[11px] text-slate-400">
+                <div className="rounded-2xl border border-theme-border/5 bg-theme-surface/20 p-4">
+                  <p className="text-[10px] uppercase tracking-[0.25em] text-theme-subtle">Computed File Hash</p>
+                  <p className="mt-2 break-all font-mono text-[11px] text-theme-muted">
                     {result.uploadedHash || 'N/A'}
                   </p>
                 </div>
 
                 {result.status === 'AUTHENTIC' && (
                   <>
-                    <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
-                      <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">Recorded File Name</p>
+                    <div className="rounded-2xl border border-theme-border/5 bg-theme-surface/20 p-4">
+                      <p className="text-[10px] uppercase tracking-[0.25em] text-theme-subtle">Recorded File Name</p>
                       <p className="mt-2 font-mono text-[11px] text-emerald-400">
                         {result.fileName}
                       </p>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
-                        <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">Machine ID</p>
+                      <div className="rounded-2xl border border-theme-border/5 bg-theme-surface/20 p-4">
+                        <p className="text-[10px] uppercase tracking-[0.25em] text-theme-subtle">Machine ID</p>
                         <p className="mt-2 font-mono text-[11px] text-cyan-400">
                           {result.machineId}
                         </p>
                       </div>
-                      <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
-                        <p className="text-[10px] uppercase tracking-[0.25em] text-slate-500">Stored At</p>
-                        <p className="mt-2 font-mono text-[11px] text-slate-400">
+                      <div className="rounded-2xl border border-theme-border/5 bg-theme-surface/20 p-4">
+                        <p className="text-[10px] uppercase tracking-[0.25em] text-theme-subtle">Stored At</p>
+                        <p className="mt-2 font-mono text-[11px] text-theme-muted">
                           {result.recordTimestamp}
                         </p>
                       </div>
                     </div>
                   </>
                 )}
+
+                {result.verifiedBy && (
+                  <div className="rounded-2xl border border-theme-border/5 bg-theme-surface/20 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.25em] text-theme-subtle">Verified By</p>
+                    <p className="mt-2 font-mono text-[11px] text-blue-400">
+                      {result.verifiedBy}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
-            <div className="flex min-h-[300px] items-center justify-center rounded-3xl border border-dashed border-white/10 bg-slate-950/70 p-8 text-center">
+            <div className="flex min-h-[300px] items-center justify-center rounded-3xl border border-dashed border-theme-border/10 bg-theme-surface/70 p-8 text-center">
               <div className="max-w-xs">
-                <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+                <p className="text-xs uppercase tracking-[0.3em] text-theme-subtle">
                   Ready for Input
                 </p>
-                <p className="mt-3 text-sm leading-6 text-slate-400">
-                  Select a telemetry record to compare its cryptographic signature 
+                <p className="mt-3 text-sm leading-6 text-theme-muted">
+                  Select a telemetry record to compare its cryptographic signature
                   against the on-chain log registry.
                 </p>
               </div>

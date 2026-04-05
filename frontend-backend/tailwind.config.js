@@ -6,9 +6,35 @@ export default {
       colors: {
         panel: '#111827',
         line: 'rgba(148, 163, 184, 0.18)',
+        theme: {
+          base: 'rgb(var(--c-base) / <alpha-value>)',
+          surface: 'rgb(var(--c-surface) / <alpha-value>)',
+          glass: 'rgb(var(--c-surface-glass) / <alpha-value>)',
+          card: 'rgb(var(--c-card) / <alpha-value>)',
+          text: 'rgb(var(--c-text) / <alpha-value>)',
+          muted: 'rgb(var(--c-muted) / <alpha-value>)',
+          subtle: 'rgb(var(--c-subtle) / <alpha-value>)',
+          border: 'rgb(var(--c-border) / <alpha-value>)',
+          chart: {
+            blue: 'rgb(var(--chart-blue-text) / <alpha-value>)',
+            pink: 'rgb(var(--chart-pink-text) / <alpha-value>)',
+            yellow: 'rgb(var(--chart-yellow-text) / <alpha-value>)',
+            emerald: 'rgb(var(--chart-emerald-text) / <alpha-value>)',
+          },
+          accent: {
+            purple: 'rgb(var(--accent-purple) / <alpha-value>)',
+            'purple-text': 'rgb(var(--accent-purple-text) / <alpha-value>)',
+            blue: 'rgb(var(--accent-blue) / <alpha-value>)',
+            'blue-text': 'rgb(var(--accent-blue-text) / <alpha-value>)',
+            emerald: 'rgb(var(--accent-emerald) / <alpha-value>)',
+            'emerald-text': 'rgb(var(--accent-emerald-text) / <alpha-value>)',
+            cyan: 'rgb(var(--accent-cyan) / <alpha-value>)',
+            'cyan-text': 'rgb(var(--accent-cyan-text) / <alpha-value>)',
+          }
+        }
       },
       boxShadow: {
-        glow: '0 0 0 1px rgba(148,163,184,0.08), 0 20px 60px rgba(15,23,42,0.45)',
+        glow: 'var(--shadow-glow)',
       },
       animation: {
         float: 'float 7s ease-in-out infinite',

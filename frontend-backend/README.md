@@ -152,10 +152,16 @@ Result: Authentic or Tampered
 
 ---
 
-## Contributors
+## Special Acknowledgement
 
-- Sayantan Das
-- Team CodeCraftersE
+The blockchain infrastructure and smart contract logic powering this system are based on the [ChainLog](https://github.com/Nilanjan-Mondal/ChainLog) project.
+
+We would like to extend our sincere appreciation to **Nilanjan Mondal** for designing and implementing the underlying smart contract architecture. His contribution forms the backbone of the blockchain layer in this project.
+
+- Project Repository: [github.com/Nilanjan-Mondal/ChainLog](https://github.com/Nilanjan-Mondal/ChainLog)
+- GitHub Profile: [github.com/Nilanjan-Mondal](https://github.com/Nilanjan-Mondal)
+
+The smart contract is deployed and tested on the Celo Sepolia test network, enabling a secure and efficient environment for tamper-proof log storage and verification.
 
 ---
 
