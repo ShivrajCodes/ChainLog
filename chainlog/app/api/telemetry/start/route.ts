@@ -28,7 +28,7 @@ export async function POST() {
         {
           error: "Wrong network",
           details: msg,
-          hint: "Use Celo Alfajores RPC: https://alfajores-forno.celo-testnet.org",
+          hint: "Use Celo Sepolia RPC: https://forno.celo-sepolia.celo-testnet.org",
         },
         { status: 400 }
       );

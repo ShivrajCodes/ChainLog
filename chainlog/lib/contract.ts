@@ -1,7 +1,7 @@
 import { ethers } from "ethers";
 import ABI from "@/abi/LogIntegrity.json";
 
-const CELO_SEPOLIA_CHAIN_ID = 44787;
+const CELO_SEPOLIA_CHAIN_ID = 11142220;
 
 export function getProvider(): ethers.JsonRpcProvider {
   const rpcUrl = process.env.RPC_URL;
@@ -20,8 +20,8 @@ export async function assertCorrectNetwork(): Promise<void> {
   const network = await provider.getNetwork();
   if (Number(network.chainId) !== CELO_SEPOLIA_CHAIN_ID) {
     throw new Error(
-      `Wrong network: connected to chainId ${network.chainId} but expected Celo Alfajores (${CELO_SEPOLIA_CHAIN_ID}). ` +
-      `Check your RPC_URL in .env.local — it should be https://alfajores-forno.celo-testnet.org`
+      `Wrong network: connected to chainId ${network.chainId} but expected Celo Sepolia (${CELO_SEPOLIA_CHAIN_ID}). ` +
+      `Check youur RPC_URL and ensure it's set to a Celo Sepolia endpoint like https://forno.celo-sepolia.celo-testnet.org`
     );
   }
 }
