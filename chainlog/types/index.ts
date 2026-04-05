@@ -1,12 +1,10 @@
-import { TelemetryEntry, HealthState } from '@/lib/telemetry';
-
-export type { TelemetryEntry, HealthState };
+export * from "@/lib/types";
 
 export interface TelemetryBatch {
   machineId: string;
   fileName: string;
   sessionStart: string;
-  entries: TelemetryEntry[];
+  entries: import("@/lib/types").TelemetryEntry[];
 }
 
 export interface OnChainRecord {
@@ -14,7 +12,7 @@ export interface OnChainRecord {
   fileHash: string;
   fileName: string;
   machineId: string;
-  owner: string;
+  owner?: string;
   timestamp: number;
 }
 
@@ -44,7 +42,7 @@ export interface VerifyLogResponse {
   record: {
     fileName: string;
     machineId: string;
-    owner: string;
+    owner?: string;
     timestamp: number;
   };
 }

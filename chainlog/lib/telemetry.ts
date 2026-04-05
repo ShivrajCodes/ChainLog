@@ -1,52 +1,37 @@
-export type HealthState = 'GOOD' | 'WARNING' | 'CRITICAL';
+import { TelemetryEntry, HealthState } from "./types";
 
-export type TelemetryEntry = {
-  timestamp: string;
-  temperature: number;
-  rpm: number;
-  vibration: number;
-  health: HealthState;
-};
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
-function drift(value: number, variation: number): number {
-  return value + (Math.random() * 2 - 1) * variation;
-}
+export function getTelemetryEntry(
+  previousLog?: TelemetryEntry
+): TelemetryEntry {
+  const prevTemp = previousLog?.temperature ?? 68;
+  const prevRpm = previousLog?.rpm ?? 1480;
+  const prevVib = previousLog?.vibration ?? 3.1;
 
-function computeHealth(temp: number, rpm: number, vibration: number): HealthState {
-  if (temp > 90 || vibration > 8 || rpm > 5000) {
-    return 'CRITICAL';
-  }
-  if (temp > 75 || vibration > 5 || rpm > 4000) {
-    return 'WARNING';
-  }
-  return 'GOOD';
-}
+  const temperature = Number(
+    clamp(prevTemp + (Math.random() * 10 - 5), 56, 103).toFixed(1)
+  );
 
-export function getTelemetryEntry(prev?: TelemetryEntry): TelemetryEntry {
-  let temperature = prev?.temperature ?? 60;
-  let rpm = prev?.rpm ?? 3000;
-  let vibration = prev?.vibration ?? 2;
+  const rpm = Math.round(
+    clamp(prevRpm + (Math.random() * 180 - 90), 900, 3200)
+  );
 
-  temperature = clamp(drift(temperature, 2), 40, 100);
-  rpm = clamp(drift(rpm, 150), 1000, 6000);
-  vibration = clamp(drift(vibration, 0.5), 0.5, 10);
+  const vibration = Number(
+    clamp(prevVib + (Math.random() * 1.6 - 0.8), 1.2, 8.8).toFixed(2)
+  );
 
-  if (Math.random() < 0.05) {
-    temperature += Math.random() * 10;
-    vibration += Math.random() * 2;
-  }
-
-  const health = computeHealth(temperature, rpm, vibration);
+  let health: HealthState = "GOOD";
+  if (temperature > 92 || vibration > 7.2) health = "CRITICAL";
+  else if (temperature > 78 || vibration > 5.2) health = "WARNING";
 
   return {
-    timestamp: new Date().toISOString(),
-    temperature: Number(temperature.toFixed(2)),
-    rpm: Math.round(rpm),
-    vibration: Number(vibration.toFixed(2)),
+    temperature,
+    rpm,
+    vibration,
     health,
+    timestamp: new Date().toISOString(),
   };
 }

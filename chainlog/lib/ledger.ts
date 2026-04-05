@@ -1,127 +1,106 @@
-import fs from "fs";
+import fs from "fs/promises";
 import path from "path";
-import crypto from "crypto";
 
 const LEDGER_PATH = path.join(process.cwd(), "data", "ledger.json");
 
 export interface LedgerRecord {
   recordId: string;
   fileName: string;
-  fileHash: string;       // hex SHA-256 of the batch JSON
-  timestamp: number;      // unix ms (KEEP THIS)
+  fileHash: string;
+  timestamp: number;
   machineId: string;
   entries: number;
-  owner: string;          // wallet address or session email
-  onChain: boolean;       // true once submitted to Celo
+  onChain: boolean;
   txHash?: string;
+  owner?: string;
 }
 
-/* ─────────────────────────────────────────────────────────────── */
-/* Ensure storage exists */
-/* ─────────────────────────────────────────────────────────────── */
-
-function ensureDir() {
-  const dir = path.dirname(LEDGER_PATH);
-
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  if (!fs.existsSync(LEDGER_PATH)) {
-    fs.writeFileSync(LEDGER_PATH, "[]", "utf8");
-  }
+export interface LedgerData {
+  records: LedgerRecord[];
+  users: unknown[];
+  otpStore: Record<
+    string,
+    { otp: string; expiresAt: number; name: string; password: string }
+  >;
 }
 
-/* ─────────────────────────────────────────────────────────────── */
-/* Read / Write */
-/* ─────────────────────────────────────────────────────────────── */
+const DEFAULT_LEDGER: LedgerData = {
+  records: [],
+  users: [],
+  otpStore: {},
+};
 
-export function readLedger(): LedgerRecord[] {
-  ensureDir();
-
+export async function readLedger(): Promise<LedgerData> {
   try {
-    return JSON.parse(fs.readFileSync(LEDGER_PATH, "utf8")) as LedgerRecord[];
+    await fs.mkdir(path.dirname(LEDGER_PATH), { recursive: true });
+
+    const raw = await fs.readFile(LEDGER_PATH, "utf-8");
+
+    if (!raw || raw.trim() === "") {
+      return DEFAULT_LEDGER;
+    }
+
+    const parsed = JSON.parse(raw);
+
+    return {
+      records: Array.isArray(parsed.records) ? parsed.records : [],
+      users: Array.isArray(parsed.users) ? parsed.users : [],
+      otpStore:
+        typeof parsed.otpStore === "object" && parsed.otpStore !== null
+          ? parsed.otpStore
+          : {},
+    };
   } catch {
-    return [];
+    return DEFAULT_LEDGER;
   }
 }
 
-export function writeLedger(records: LedgerRecord[]) {
-  ensureDir();
-  fs.writeFileSync(LEDGER_PATH, JSON.stringify(records, null, 2), "utf8");
+export async function writeLedger(data: LedgerData): Promise<void> {
+  await fs.mkdir(path.dirname(LEDGER_PATH), { recursive: true });
+
+  await fs.writeFile(
+    LEDGER_PATH,
+    JSON.stringify(data, null, 2),
+    "utf-8"
+  );
 }
 
-export function appendRecord(record: LedgerRecord) {
-  const all = readLedger();
-  all.unshift(record); // newest first
-  writeLedger(all);
+export async function addRecord(record: LedgerRecord): Promise<void> {
+  const ledger = await readLedger();
+
+  if (!Array.isArray(ledger.records)) {
+    ledger.records = [];
+  }
+
+  ledger.records = [
+    record,
+    ...ledger.records.filter((r) => r.recordId !== record.recordId),
+  ];
+
+  await writeLedger(ledger);
 }
 
-export function findRecord(fileHash: string): LedgerRecord | undefined {
-  return readLedger().find((r) => r.fileHash === fileHash);
+export async function findRecordByHash(
+  fileHash: string
+): Promise<LedgerRecord | null> {
+  const ledger = await readLedger();
+
+  if (!Array.isArray(ledger.records)) return null;
+
+  const needle = fileHash.replace(/^0x/, "").toLowerCase();
+
+  return (
+    ledger.records.find(
+      (r) =>
+        r.fileHash.replace(/^0x/, "").toLowerCase() === needle
+    ) ?? null
+  );
 }
 
-/* ─────────────────────────────────────────────────────────────── */
-/* Hashing */
-/* ─────────────────────────────────────────────────────────────── */
+export async function getAllRecords(): Promise<LedgerRecord[]> {
+  const ledger = await readLedger();
 
-export function hashBatch(data: unknown): string {
-  const json = JSON.stringify(data);
-  return crypto.createHash("sha256").update(json).digest("hex");
-}
+  if (!Array.isArray(ledger.records)) return [];
 
-export function makeRecordId(fileHash: string): string {
-  return fileHash.slice(0, 64).padEnd(64, "0");
-}
-
-/* ─────────────────────────────────────────────────────────────── */
-/* Timestamp Utilities */
-/* ─────────────────────────────────────────────────────────────── */
-
-/**
- * Get current timestamp (standardized)
- */
-export function now(): number {
-  return Date.now();
-}
-
-/**
- * Format timestamp for UI (clean readable)
- */
-export function formatTimestamp(ts: number): string {
-  const date = new Date(ts);
-
-  return date.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-/**
- * ISO format (best for logs / debugging / blockchain consistency)
- */
-export function formatISO(ts: number): string {
-  return new Date(ts).toISOString();
-}
-
-/**
- * Relative time (nice UX: "2 mins ago")
- */
-export function formatRelative(ts: number): string {
-  const diff = Date.now() - ts;
-
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-
-  if (seconds < 60) return `${seconds}s ago`;
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return ledger.records;
 }
