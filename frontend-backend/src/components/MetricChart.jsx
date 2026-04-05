@@ -4,18 +4,18 @@ import { useMemo } from 'react';
  * A high-fidelity analytic chart component with Bezier smoothing, 
  * adaptive grid lines, and full axis support.
  */
-function MetricChart({ 
-  title, 
-  data = [], 
-  timestamps = [], 
-  color = 'blue', 
+function MetricChart({
+  title,
+  data = [],
+  timestamps = [],
+  color = 'blue',
   height = 200,
   minValue,
   maxValue,
   unit
 }) {
   const margin = { top: 20, right: 20, bottom: 40, left: 50 };
-  
+
   const stats = useMemo(() => {
     if (data.length === 0) {
       const min = minValue ?? 0;
@@ -50,24 +50,24 @@ function MetricChart({
   // Bezier Smoothing Calculation (Catmull-Rom to Cubic Bezier approximation)
   const bezierPath = useMemo(() => {
     if (points.length < 2) return '';
-    
+
     let path = `M ${points[0].x},${points[0].y}`;
-    
+
     for (let i = 0; i < points.length - 1; i++) {
       const p0 = points[i === 0 ? 0 : i - 1];
       const p1 = points[i];
       const p2 = points[i + 1];
       const p3 = points[i + 2 === points.length ? i + 1 : i + 2];
-      
+
       const cp1x = p1.x + (p2.x - p0.x) / 6;
       const cp1y = p1.y + (p2.y - p0.y) / 6;
-      
+
       const cp2x = p2.x - (p3.x - p1.x) / 6;
       const cp2y = p2.y - (p3.y - p1.y) / 6;
-      
+
       path += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
     }
-    
+
     return path;
   }, [points]);
 
@@ -92,44 +92,44 @@ function MetricChart({
 
   const colorConfig = {
     blue: {
-      stroke: '#4f83ff',
-      area: 'rgba(79, 131, 255, 0.06)',
-      text: 'text-blue-400',
-      border: 'border-blue-500/25',
+      stroke: 'var(--chart-blue-stroke)',
+      area: 'var(--chart-blue-area)',
+      text: 'text-theme-chart-blue',
+      border: 'border-theme-chart-blue/25',
     },
     rose: {
-      stroke: '#ef5da8',
-      area: 'rgba(239, 93, 168, 0.06)',
-      text: 'text-pink-400',
-      border: 'border-pink-500/25',
+      stroke: 'var(--chart-pink-stroke)',
+      area: 'var(--chart-pink-area)',
+      text: 'text-theme-chart-pink',
+      border: 'border-theme-chart-pink/25',
     },
     amber: {
-      stroke: '#f4c542',
-      area: 'rgba(244, 197, 66, 0.06)',
-      text: 'text-yellow-400',
-      border: 'border-yellow-500/25',
+      stroke: 'var(--chart-yellow-stroke)',
+      area: 'var(--chart-yellow-area)',
+      text: 'text-theme-chart-yellow',
+      border: 'border-theme-chart-yellow/25',
     },
     emerald: {
-      stroke: '#5cd46d',
-      area: 'rgba(92, 212, 109, 0.06)',
-      text: 'text-emerald-400',
-      border: 'border-emerald-500/25',
+      stroke: 'var(--chart-emerald-stroke)',
+      area: 'var(--chart-emerald-area)',
+      text: 'text-theme-chart-emerald',
+      border: 'border-theme-chart-emerald/25',
     }
-  }[color] || { stroke: '#94a3b8', area: 'none', text: 'text-slate-400', border: 'border-white/10' };
+  }[color] || { stroke: '#94a3b8', area: 'none', text: 'text-theme-muted', border: 'border-theme-border/10' };
 
   return (
-    <div className={`rounded-[1.5rem] border bg-slate-950/40 p-6 backdrop-blur-sm transition-all hover:bg-slate-950/60 ${colorConfig.border}`}>
+    <div className={`rounded-[1.5rem] border bg-theme-surface/40 p-6 backdrop-blur-sm transition-all hover:bg-theme-surface/60 ${colorConfig.border}`}>
       <div className="flex items-center justify-between gap-3">
         <h3 className={`text-2xl font-semibold tracking-tight ${colorConfig.text}`}>
-        {title}
+          {title}
         </h3>
-        {unit ? <span className="text-[10px] uppercase tracking-[0.3em] text-slate-600">{unit}</span> : null}
+        {unit ? <span className="text-[10px] uppercase tracking-[0.3em] text-theme-subtle">{unit}</span> : null}
       </div>
-      
+
       <div className="mt-6">
         <svg width="100%" height={height} viewBox={`0 0 ${viewWidth} ${viewHeight}`} className="overflow-visible">
           {/* Background Grid */}
-          <g stroke="#ffffff" strokeOpacity="0.05" strokeDasharray="3,3">
+          <g className="stroke-theme-border/20" strokeDasharray="3,3">
             {yTicks.map((tick, i) => {
               const y = margin.top + graphHeight - (i / 4) * graphHeight;
               return <line key={i} x1={margin.left} y1={y} x2={margin.left + graphWidth} y2={y} />;
@@ -140,7 +140,7 @@ function MetricChart({
           </g>
 
           {/* Y-Axis Labels */}
-          <g className="text-[10px] font-mono fill-slate-500">
+          <g className="text-[10px] font-mono fill-theme-subtle">
             {yTicks.map((tick, i) => {
               const y = margin.top + graphHeight - (i / 4) * graphHeight;
               return (
@@ -152,7 +152,7 @@ function MetricChart({
           </g>
 
           {/* X-Axis Labels */}
-          <g className="text-[9px] font-mono fill-slate-500">
+          <g className="text-[9px] font-mono fill-theme-subtle">
             {xTicks.map((tick, i) => (
               <text key={i} x={tick.x} y={viewHeight - 5} textAnchor="middle">
                 {tick.label}
@@ -161,7 +161,7 @@ function MetricChart({
           </g>
 
           {/* Gradient Area Fill */}
-          <path 
+          <path
             d={`${bezierPath} L ${margin.left + graphWidth},${margin.top + graphHeight} L ${margin.left},${margin.top + graphHeight} Z`}
             fill={colorConfig.area}
           />
