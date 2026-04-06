@@ -7,9 +7,8 @@ import { storeLogOnChain } from '../blockchain';
 
 const TICK_RATE_MS = 10000;
 const MAX_HISTORY = 30;
-const MACHINE_ID = 'SENSOR-NODE-01'; // Identifier for this telemetry source
+const MACHINE_ID = 'SENSOR-NODE-01';
 
-// Internal mapping for numerical analytics
 const HEALTH_SCORES = {
   GOOD: 100,
   WARNING: 50,
@@ -17,37 +16,20 @@ const HEALTH_SCORES = {
 };
 
 const HEALTH_STYLES = {
-  GOOD: 'text-emerald-300 bg-emerald-500/15 ring-emerald-400/30',
-  WARNING: 'text-amber-300 bg-amber-500/15 ring-amber-400/30',
-  CRITICAL: 'text-rose-300 bg-rose-500/15 ring-rose-400/30',
+  GOOD: {
+    pill: 'text-emerald-200 bg-emerald-500/10 border-emerald-400/20',
+    dot: 'bg-emerald-400 shadow-[0_0_24px_rgba(74,222,128,0.8)]',
+  },
+  WARNING: {
+    pill: 'text-amber-200 bg-amber-500/10 border-amber-400/20',
+    dot: 'bg-amber-400 shadow-[0_0_24px_rgba(251,191,36,0.8)]',
+  },
+  CRITICAL: {
+    pill: 'text-rose-200 bg-rose-500/10 border-rose-400/20',
+    dot: 'bg-rose-400 shadow-[0_0_24px_rgba(251,113,133,0.8)]',
+  },
 };
 
-function MetricCard({ label, value, unit, statusTone }) {
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between gap-4">
-        <span className="text-[10px] uppercase tracking-[0.25em] text-theme-subtle font-bold">{label}</span>
-        <span className={`h-2.5 w-2.5 rounded-full ${statusTone}`} />
-      </div>
-
-      <div className="mt-5 flex items-end gap-1.5">
-        <span className="text-3xl font-semibold text-theme-text sm:text-4xl">{value}</span>
-        {unit ? <span className="pb-1 text-[10px] uppercase tracking-[0.1em] text-theme-subtle font-medium">{unit}</span> : null}
-      </div>
-    </Card>
-  );
-}
-
-function statusAccent(health) {
-  if (health === 'CRITICAL') return 'bg-rose-400 shadow-[0_0_24px_rgba(251,113,133,0.8)]';
-  if (health === 'WARNING') return 'bg-amber-400 shadow-[0_0_24px_rgba(251,191,36,0.8)]';
-  return 'bg-emerald-400 shadow-[0_0_24px_rgba(52,211,153,0.8)]';
-}
-
-/**
- * Encodes a UNIX timestamp into a URL-safe Base64 string.
- * Reversible: atob(encoded) returns the original timestamp string.
- */
 function encodeTimestamp(unixSeconds) {
   return btoa(String(unixSeconds))
     .replace(/\+/g, '-')
@@ -55,18 +37,12 @@ function encodeTimestamp(unixSeconds) {
     .replace(/=+$/, '');
 }
 
-/**
- * Creates a local download record with an encrypted-timestamp filename.
- * Includes user email in the exported data if available.
- */
 function createLogFile(log, userEmail) {
   const unixTs = Math.floor(new Date(log.timestamp).getTime() / 1000);
   const encoded = encodeTimestamp(unixTs);
   const fileName = `log_${encoded}.json`;
 
-  const exportData = userEmail
-    ? { ...log, user: userEmail }
-    : log;
+  const exportData = userEmail ? { ...log, user: userEmail } : log;
   const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
 
@@ -75,63 +51,82 @@ function createLogFile(log, userEmail) {
     fileName,
     url,
     createdAt: log.timestamp,
+    data: exportData,
   };
 }
 
-/**
- * Programmatically triggers a browser download for the given file record.
- * Creates a hidden anchor, clicks it, then revokes the object URL after a delay.
- */
-function triggerAutoDownload(fileRecord) {
-  const anchor = document.createElement('a');
-  anchor.href = fileRecord.url;
-  anchor.download = fileRecord.fileName;
-  anchor.style.display = 'none';
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
+async function verifyFolderPermission(dirHandle) {
+  if (!dirHandle) return false;
 
-  // Revoke after browser has had time to initiate the download
-  setTimeout(() => URL.revokeObjectURL(fileRecord.url), 5000);
-}
-
-/**
- * Sends the generated log to the local Save-Server for quiet filesystem writing.
- */
-async function saveLogToDisk(fileRecord, logData) {
   try {
-    const response = await fetch('http://localhost:3001/save-log', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fileName: fileRecord.fileName,
-        data: logData
-      })
-    });
-    
-    if (!response.ok) {
-      console.warn('Local Save-Server unreachable or error:', response.statusText);
+    const options = { mode: 'readwrite' };
+
+    if ((await dirHandle.queryPermission(options)) === 'granted') {
+      return true;
     }
+
+    if ((await dirHandle.requestPermission(options)) === 'granted') {
+      return true;
+    }
+
+    return false;
   } catch (err) {
-    console.error('Failed to communicate with Save-Server:', err.message);
+    console.error('Folder permission check failed:', err);
+    return false;
   }
 }
 
-/**
- * Triggers the deletion of all session JSON logs on the local server.
- */
-async function clearLogsOnBackend() {
+async function writeLogToSelectedFolder(dirHandle, fileRecord) {
+  if (!dirHandle) return false;
+
+  const hasPermission = await verifyFolderPermission(dirHandle);
+  if (!hasPermission) return false;
+
   try {
-    const response = await fetch('http://localhost:3001/api/clear-logs', {
-      method: 'DELETE'
-    });
-    
-    if (!response.ok) {
-      console.warn('Failed to clear logs on backend:', response.statusText);
-    }
+    const fileHandle = await dirHandle.getFileHandle(fileRecord.fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(fileRecord.data, null, 2));
+    await writable.close();
+    return true;
   } catch (err) {
-    console.error('Failed to trigger backend cleanup:', err.message);
+    console.error('File save failed:', err);
+    return false;
   }
+}
+
+function SmallKpi({ label, value, unit, dotClass }) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-theme-subtle">
+          {label}
+        </span>
+        <span className={`h-2.5 w-2.5 rounded-full ${dotClass}`} />
+      </div>
+
+      <div className="mt-4 flex items-end gap-2">
+        <span className="text-3xl font-semibold tracking-tight text-white">{value}</span>
+        {unit ? (
+          <span className="pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-theme-subtle">
+            {unit}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value, tone = 'text-theme-muted', mono = false }) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
+      <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-theme-subtle">
+        {label}
+      </p>
+      <p className={`mt-2 break-all text-sm ${mono ? 'font-mono' : ''} ${tone}`}>
+        {value}
+      </p>
+    </div>
+  );
 }
 
 function TelemetryStream({ signer, user }) {
@@ -142,15 +137,45 @@ function TelemetryStream({ signer, user }) {
   const [generationCount, setGenerationCount] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [lastTxHash, setLastTxHash] = useState(null);
+  const [folderSelected, setFolderSelected] = useState(false);
+  const [saveWarning, setSaveWarning] = useState('');
 
   const lastLogRef = useRef(null);
   const activeFileUrlsRef = useRef([]);
   const nextEmissionAtRef = useRef(Date.now());
   const generationTimeoutRef = useRef(null);
+  const dirHandleRef = useRef(null);
 
-  // Core emission logic
-  const tick = () => {
+  const supportsFolderSave =
+    typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+
+  const handleSelectFolder = async () => {
+    try {
+      if (!supportsFolderSave) {
+        alert('Your browser does not support folder save. Please use Chrome or Edge on desktop.');
+        return;
+      }
+
+      const dirHandle = await window.showDirectoryPicker();
+      const hasPermission = await verifyFolderPermission(dirHandle);
+
+      if (!hasPermission) {
+        setFolderSelected(false);
+        dirHandleRef.current = null;
+        return;
+      }
+
+      dirHandleRef.current = dirHandle;
+      setFolderSelected(true);
+      setSaveWarning('');
+    } catch (err) {
+      console.error('Folder selection cancelled or failed:', err);
+    }
+  };
+
+  const tick = async () => {
     setIsGenerating(true);
+
     const nextLog = getTelemetryEntry(lastLogRef.current);
     const nextFile = createLogFile(nextLog, user?.email);
 
@@ -162,19 +187,25 @@ function TelemetryStream({ signer, user }) {
     setLogs((current) => [nextLog, ...current].slice(0, MAX_HISTORY));
     setFiles((current) => [nextFile, ...current].slice(0, 10));
 
-    // Auto-download (Browser Popup Fallback)
-    triggerAutoDownload(nextFile);
-    
-    // Save to Disk (Data Folder via Local Server)
-    saveLogToDisk(nextFile, nextLog);
+    if (dirHandleRef.current) {
+      const saved = await writeLogToSelectedFolder(dirHandleRef.current, nextFile);
 
-    // Fire and forget blockchain storage without blocking UI
+      if (!saved) {
+        setSaveWarning('Autosave is currently unavailable.');
+      } else {
+        setSaveWarning('');
+      }
+    }
+
     if (signer && user) {
-      const unixTimestamp = Math.floor(new Date(nextLog.timestamp).getTime() / 1000);
-      generateHash(nextLog)
-        .then((hash) => storeLogOnChain(hash, unixTimestamp, nextFile.fileName, MACHINE_ID, signer))
-        .then((txHash) => setLastTxHash(txHash))
-        .catch((err) => console.error('Failed to store on chain:', err));
+      try {
+        const unixTimestamp = Math.floor(new Date(nextLog.timestamp).getTime() / 1000);
+        const hash = await generateHash(nextLog);
+        const txHash = await storeLogOnChain(hash, unixTimestamp, nextFile.fileName, MACHINE_ID, signer);
+        setLastTxHash(txHash);
+      } catch (err) {
+        console.error('Failed to store on chain:', err);
+      }
     }
 
     window.clearTimeout(generationTimeoutRef.current);
@@ -183,21 +214,22 @@ function TelemetryStream({ signer, user }) {
     }, 1200);
   };
 
-
-
   useEffect(() => {
-    if (!isRunning || !signer) return; // Don't tick unless actively running with a wallet
+    if (!isRunning || !signer || !user) return;
     tick();
     return () => window.clearTimeout(generationTimeoutRef.current);
-  }, [isRunning, signer]);
+  }, [isRunning, signer, user]);
 
   useEffect(() => {
-    if (!isRunning || !signer) return;
+    if (!isRunning || !signer || !user) return;
 
     nextEmissionAtRef.current = Date.now() + TICK_RATE_MS;
     setSecondsUntilNext(10);
 
-    const intervalId = window.setInterval(tick, TICK_RATE_MS);
+    const intervalId = window.setInterval(() => {
+      tick();
+    }, TICK_RATE_MS);
+
     const tickerId = window.setInterval(() => {
       const msRemaining = Math.max(0, nextEmissionAtRef.current - Date.now());
       setSecondsUntilNext(Math.ceil(msRemaining / 1000));
@@ -207,7 +239,7 @@ function TelemetryStream({ signer, user }) {
       window.clearInterval(intervalId);
       window.clearInterval(tickerId);
     };
-  }, [isRunning]);
+  }, [isRunning, signer, user]);
 
   useEffect(() => {
     const previousUrls = activeFileUrlsRef.current;
@@ -226,11 +258,9 @@ function TelemetryStream({ signer, user }) {
     };
   }, []);
 
-
-
   const latestLog = logs[0];
-  const healthPillClass = latestLog ? HEALTH_STYLES[latestLog.health] : HEALTH_STYLES.GOOD;
-  const signalTone = latestLog ? statusAccent(latestLog.health) : statusAccent('GOOD');
+  const currentHealth = latestLog?.health || 'GOOD';
+  const activeHealth = HEALTH_STYLES[currentHealth];
   const progressPercent = ((TICK_RATE_MS - secondsUntilNext * 1000) / TICK_RATE_MS) * 100;
   const safeProgressPercent = Math.max(0, Math.min(100, progressPercent));
   const reportsPerMinute = Math.round((60000 / TICK_RATE_MS) * 10) / 10;
@@ -238,12 +268,12 @@ function TelemetryStream({ signer, user }) {
   const metrics = useMemo(
     () => [
       {
-        label: 'Current Temp',
+        label: 'Temperature',
         value: latestLog ? latestLog.temperature : '--',
         unit: 'C',
       },
       {
-        label: 'RPM Speed',
+        label: 'Speed',
         value: latestLog ? latestLog.rpm : '--',
         unit: 'rpm',
       },
@@ -257,196 +287,226 @@ function TelemetryStream({ signer, user }) {
   );
 
   const historyData = useMemo(() => {
-    const timestamps = logs.map(l => l.timestamp);
+    const timestamps = logs.map((l) => l.timestamp);
     return {
       timestamps,
-      temperature: logs.map(l => l.temperature),
-      rpm: logs.map(l => l.rpm),
-      vibration: logs.map(l => l.vibration),
-      health: logs.map(l => HEALTH_SCORES[l.health] || 0)
+      temperature: logs.map((l) => l.temperature),
+      rpm: logs.map((l) => l.rpm),
+      vibration: logs.map((l) => l.vibration),
+      health: logs.map((l) => HEALTH_SCORES[l.health] || 0),
     };
   }, [logs]);
 
+  const controllerMessage = !signer
+    ? 'Wallet connection required.'
+    : !user
+      ? 'Google sign-in required.'
+      : !isRunning
+        ? generationCount === 0
+          ? 'Ready to start telemetry stream.'
+          : 'Telemetry stream paused.'
+        : isGenerating
+          ? 'Generating packet and updating records...'
+          : `Next packet in ${secondsUntilNext}s`;
+
   return (
-    <section id="telemetry" className="space-y-12">
+    <section id="telemetry" className="space-y-8">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <div className="max-w-2xl">
-          <p className="text-[10px] uppercase tracking-[0.4em] text-emerald-400 font-bold">
-            Real-Time Telemetry Feed
+        <div className="max-w-3xl">
+          <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-emerald-300">
+            Telemetry
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-theme-text sm:text-5xl">
-            Live industrial monitoring with high-fidelity signal tracking.
+          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
+            Real-time machine log stream
           </h2>
-          <p className="mt-5 text-base leading-8 text-theme-muted">
-            Automated sensor snapshots are emitted every 10 seconds. These records
-            represent the raw system state before any integrity measures are applied.
+          <p className="mt-4 text-base leading-8 text-theme-muted">
+            View current machine status, generate log packets, export files, and anchor records on-chain.
           </p>
         </div>
 
-        <div className="rounded-full border border-theme-border/10 bg-theme-card/5 px-5 py-3.5 text-xs text-theme-muted shadow-glow backdrop-blur font-mono">
-          <div className="flex items-center gap-3">
-            <span className={`h-3 w-3 rounded-full animate-pulseSoft ${signalTone}`} />
-            <span>Emission Frequency: 1/10s (approx. {reportsPerMinute} ppm)</span>
-          </div>
+        <div className="rounded-full border border-white/10 bg-white/[0.04] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-theme-muted">
+          1 packet / 10s • {reportsPerMinute} ppm
         </div>
       </div>
 
-      {/* Snapshot and Status Pulse */}
-      <Card className="relative overflow-hidden group">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/60 to-transparent" />
-        <div className="grid gap-8 lg:grid-cols-[1.6fr_0.95fr]">
-          <div>
-            <div className="flex items-start justify-between gap-4">
+      <Card className="p-0">
+        <div className="grid gap-0 xl:grid-cols-[1.45fr_0.85fr]">
+          <div className="border-b border-white/10 p-6 sm:p-8 xl:border-b-0 xl:border-r">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <p className="text-[10px] uppercase tracking-[0.3em] text-theme-subtle font-bold">
-                  System Snapshot
+                <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-theme-subtle">
+                  Live Snapshot
                 </p>
-                <p className="mt-2 text-sm text-theme-muted">
-                  Latest observed telemetry received from live sensors.
+                <h3 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+                  {latestLog ? 'Current machine state' : 'Awaiting first packet'}
+                </h3>
+                <p className="mt-2 max-w-2xl text-sm leading-7 text-theme-muted">
+                  Latest telemetry values and health condition for the connected machine node.
                 </p>
               </div>
-              <div
-                className={`rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[0.3em] ring-1 transition-all duration-500 ${healthPillClass}`}
-              >
-                {latestLog?.health ?? 'INITIALIZING'}
+
+              <div className={`rounded-full border px-4 py-2 text-[10px] font-bold uppercase tracking-[0.28em] ${activeHealth.pill}`}>
+                {latestLog?.health || 'IDLE'}
               </div>
             </div>
 
             <div className="mt-8 grid gap-4 md:grid-cols-3">
               {metrics.map((metric) => (
-                <MetricCard
+                <SmallKpi
                   key={metric.label}
                   label={metric.label}
                   value={metric.value}
                   unit={metric.unit}
-                  statusTone={signalTone}
+                  dotClass={activeHealth.dot}
                 />
               ))}
             </div>
 
-            <div className="mt-8 rounded-[1.75rem] border border-theme-border/5 bg-theme-card/[0.02] p-6 shadow-inner">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-[10px] uppercase tracking-[0.25em] text-theme-subtle font-bold">
-                    Emission Controller
+            <div className="mt-8 rounded-[28px] border border-white/10 bg-white/[0.03] p-5 sm:p-6">
+              <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
+                <div className="max-w-2xl">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-theme-subtle">
+                    Stream Control
                   </p>
-                  <p className="mt-3 text-xl font-medium text-theme-text">
-                    {!signer
-                      ? 'Awaiting wallet connection...'
-                      : !user
-                        ? 'Awaiting Google authentication...'
-                        : !isRunning
-                          ? (generationCount === 0 ? 'Ready to initialize feed' : 'Stream paused (Manual Override)')
-                          : isGenerating
-                            ? 'Compiling packet...'
-                            : `Next packet in ${secondsUntilNext}s`}
+                  <p className="mt-3 text-xl font-semibold tracking-tight text-white">
+                    {controllerMessage}
                   </p>
+                  {saveWarning ? (
+                    <p className="mt-3 text-sm leading-6 text-amber-300">{saveWarning}</p>
+                  ) : null}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-4">
-                  <div className="rounded-full bg-theme-surface border border-theme-border/5 px-4 py-2.5 text-[10px] font-mono text-emerald-400 tracking-wider">
-                    TOTAL_SENT: {generationCount.toString().padStart(4, '0')}
-                  </div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSelectFolder}
+                    className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.22em] text-cyan-100 transition hover:bg-cyan-500/20"
+                  >
+                    {folderSelected ? 'Change Save Folder' : 'Select Save Folder'}
+                  </button>
+
                   <button
                     type="button"
                     disabled={!signer || !user}
                     onClick={() => {
                       setIsRunning((current) => {
                         if (!current && generationCount === 0) {
-                          // Fresh start: notify backend to clear logs
-                          clearLogsOnBackend();
-                          // Clear local state
                           setLogs([]);
                           setFiles([]);
                           setLastTxHash(null);
                           lastLogRef.current = null;
-                          activeFileUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+                          activeFileUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
                           activeFileUrlsRef.current = [];
                         }
                         return !current;
                       });
                     }}
-                    className={`rounded-full border px-6 py-2.5 text-xs font-bold uppercase tracking-widest transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed ${isRunning
-                      ? 'border-rose-400/20 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 active:scale-95'
-                      : 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 active:scale-95'
-                      }`}
+                    className={`rounded-full border px-5 py-3 text-[11px] font-bold uppercase tracking-[0.22em] transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isRunning
+                        ? 'border-rose-400/20 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20'
+                        : 'border-emerald-400/20 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20'
+                    }`}
                   >
-                    {!signer ? 'Connect Wallet' : !user ? 'Sign In First' : isRunning ? 'Stop Feed' : generationCount === 0 ? 'Start Feed' : 'Resume Feed'}
+                    {!signer
+                      ? 'Connect Wallet First'
+                      : !user
+                        ? 'Sign In First'
+                        : isRunning
+                          ? 'Stop Stream'
+                          : generationCount === 0
+                            ? 'Start Stream'
+                            : 'Resume Stream'}
                   </button>
                 </div>
               </div>
 
-              <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-theme-surface border border-theme-border/5">
-                <div
-                  className={`h-full rounded-full transition-all duration-300 ease-out ${isRunning
-                    ? 'bg-gradient-to-r from-emerald-500 via-cyan-400 to-emerald-400'
-                    : 'bg-slate-700'
+              <div className="mt-6">
+                <div className="mb-2 flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.24em] text-theme-subtle">
+                  <span>Cycle Progress</span>
+                  <span>{isRunning ? `${secondsUntilNext}s` : 'Paused'}</span>
+                </div>
+
+                <div className="h-2 overflow-hidden rounded-full border border-white/8 bg-white/[0.04]">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      isRunning
+                        ? 'bg-[linear-gradient(90deg,rgba(16,185,129,1)_0%,rgba(34,211,238,1)_50%,rgba(59,130,246,1)_100%)]'
+                        : 'bg-slate-600'
                     }`}
-                  style={{ width: `${safeProgressPercent}%` }}
-                />
+                    style={{ width: `${safeProgressPercent}%` }}
+                  />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="rounded-[2rem] border border-theme-border/5 bg-theme-surface/60 p-6 shadow-glow">
-            <p className="text-[10px] uppercase tracking-[0.3em] text-theme-subtle font-bold">Pulse Diagnostics</p>
-            <div className="mt-8 space-y-6">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-theme-muted">Calculated Health</p>
-                <p className="mt-3 text-3xl font-semibold text-theme-text tracking-tight">{latestLog?.health ?? '--'}</p>
-              </div>
-              <div className="pt-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-theme-muted">Emission Epoch</p>
-                <p className="mt-3 text-xs font-mono text-theme-muted transition-all duration-300">
-                  {latestLog ? latestLog.timestamp : 'Awaiting sync...'}
-                </p>
-              </div>
-              <div className="pt-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-theme-muted">On-Chain Storage</p>
-                <div className="mt-3 flex flex-col gap-2 text-[10px] font-mono">
-                  {signer ? (
-                    lastTxHash ? (
-                      <span className="text-emerald-400 break-all bg-emerald-400/10 p-2 rounded-lg border border-emerald-400/20">
-                        TX: {lastTxHash}
-                      </span>
-                    ) : (
-                      <span className="text-theme-muted">Awaiting block confirmation...</span>
-                    )
-                  ) : (
-                    <span className="text-rose-400">Wallet offline. Connect to broadcast map.</span>
-                  )}
-                </div>
-              </div>
-              <div className="pt-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-theme-muted">Operator</p>
-                <p className="mt-3 text-xs font-mono text-theme-muted transition-all duration-300">
-                  {user ? (
-                    <span className="text-blue-400">{user.email}</span>
-                  ) : (
-                    <span className="text-amber-400">Not authenticated</span>
-                  )}
-                </p>
-              </div>
-              <div className="pt-4 border-t border-theme-border/5">
-                <p className="text-[11px] text-theme-subtle leading-relaxed italic">
-                  Telemetry logs are buffered locally up to 30 cycles for high-fidelity trend analysis before being exported for integrity verification.
-                </p>
-              </div>
+          <div className="p-6 sm:p-8">
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-theme-subtle">
+              Session Details
+            </p>
+
+            <div className="mt-6 space-y-4">
+              <InfoRow
+                label="Machine Node"
+                value={MACHINE_ID}
+                tone="text-white"
+                mono
+              />
+
+              <InfoRow
+                label="Latest Timestamp"
+                value={latestLog ? latestLog.timestamp : 'Awaiting synchronization...'}
+                mono
+              />
+
+              <InfoRow
+                label="Last Transaction"
+                value={
+                  signer
+                    ? lastTxHash || 'No transaction recorded yet.'
+                    : 'Wallet not connected.'
+                }
+                tone={signer ? (lastTxHash ? 'text-emerald-300' : 'text-theme-muted') : 'text-rose-300'}
+                mono
+              />
+
+              <InfoRow
+                label="Authenticated User"
+                value={user ? user.email : 'No authenticated user'}
+                tone={user ? 'text-cyan-200' : 'text-amber-300'}
+                mono
+              />
+
+              <InfoRow
+                label="Autosave"
+                value={folderSelected ? 'Configured' : 'Not configured'}
+                tone={folderSelected ? 'text-emerald-300' : 'text-amber-300'}
+              />
+
+              <InfoRow
+                label="Packets Generated"
+                value={generationCount.toString().padStart(4, '0')}
+                tone="text-white"
+                mono
+              />
             </div>
           </div>
         </div>
       </Card>
 
-      {/* Historical Trends Grid - Matching User Reference */}
-      <div className="space-y-6">
+      <div className="space-y-5">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-theme-text">Historical Trends</h2>
-          <p className="mt-2 text-sm text-theme-muted">High-fidelity signal tracking over the last 30 measurements.</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-cyan-200/80">
+            History
+          </p>
+          <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+            Recent telemetry trends
+          </h3>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2">
           <MetricChart
-            title="Temperature Over Time"
+            title="Temperature Profile"
             data={historyData.temperature}
             timestamps={historyData.timestamps}
             color="blue"
@@ -455,7 +515,7 @@ function TelemetryStream({ signer, user }) {
             unit="C"
           />
           <MetricChart
-            title="RPM Over Time"
+            title="Rotational Speed"
             data={historyData.rpm}
             timestamps={historyData.timestamps}
             color="rose"
@@ -464,7 +524,7 @@ function TelemetryStream({ signer, user }) {
             unit="rpm"
           />
           <MetricChart
-            title="Vibration Over Time"
+            title="Vibration Intensity"
             data={historyData.vibration}
             timestamps={historyData.timestamps}
             color="amber"
@@ -473,7 +533,7 @@ function TelemetryStream({ signer, user }) {
             unit="mm/s"
           />
           <MetricChart
-            title="Health Score Over Time"
+            title="Health Confidence"
             data={historyData.health}
             timestamps={historyData.timestamps}
             color="emerald"
@@ -484,77 +544,93 @@ function TelemetryStream({ signer, user }) {
         </div>
       </div>
 
-      <div className="grid gap-8 xl:grid-cols-[1.15fr_0.85fr]">
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <Card
-          title="Recent Snapshots"
-          subtitle="Real-time buffer of emitted telemetry packets for audit tracking."
+          title="Recent Packets"
+          subtitle="Latest machine log packets generated during the active session."
         >
           <div className="space-y-3">
             {logs.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-theme-border/10 px-8 py-12 text-center text-xs text-theme-subtle uppercase tracking-widest">
-                Awaiting first transmission...
+              <div className="rounded-[24px] border border-dashed border-white/10 px-6 py-12 text-center text-[11px] font-bold uppercase tracking-[0.22em] text-theme-subtle">
+                No packets yet
               </div>
             ) : (
-              logs.map((log, index) => (
-                <div
-                  key={`${log.timestamp}-${index}`}
-                  className={`grid gap-4 rounded-2xl border bg-theme-surface/40 p-4 transition-all duration-300 hover:border-theme-border/20 sm:grid-cols-[1.2fr_1fr] ${index === 0 ? 'border-emerald-500/20 shadow-inner bg-emerald-500/[0.02]' : 'border-theme-border/5'
-                    }`}
-                >
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <span className={`h-2.5 w-2.5 rounded-full ${statusAccent(log.health)}`} />
-                      <span className="text-xs font-semibold text-theme-text">
-                        {formatPulseTime(log.timestamp)}
-                      </span>
-                      {index === 0 && (
-                        <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-emerald-300 animate-pulse">
-                          LIVE
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-3 text-[10px] tracking-wider text-theme-subtle font-mono">
-                      EPOCH_{log.timestamp.replace(/[:.-]/g, '').slice(-8)}
-                    </p>
-                  </div>
+              logs.map((log, index) => {
+                const health = HEALTH_STYLES[log.health] || HEALTH_STYLES.GOOD;
 
-                  <div className="grid grid-cols-2 gap-3 text-[10px] font-mono text-theme-muted">
-                    <span className="flex items-center gap-1.5"><span className="text-theme-subtle">T:</span>{log.temperature}C</span>
-                    <span className="flex items-center gap-1.5"><span className="text-theme-subtle">R:</span>{log.rpm}</span>
-                    <span className="flex items-center gap-1.5"><span className="text-theme-subtle">V:</span>{log.vibration}</span>
-                    <span className="flex items-center gap-1.5"><span className="text-theme-subtle">H:</span>{log.health}</span>
+                return (
+                  <div
+                    key={`${log.timestamp}-${index}`}
+                    className={`rounded-[24px] border p-4 transition ${
+                      index === 0
+                        ? 'border-emerald-400/20 bg-emerald-500/[0.05]'
+                        : 'border-white/10 bg-white/[0.03]'
+                    }`}
+                  >
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className={`h-2.5 w-2.5 rounded-full ${health.dot}`} />
+                          <span className="text-sm font-semibold text-white">
+                            {formatPulseTime(log.timestamp)}
+                          </span>
+
+                          {index === 0 ? (
+                            <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.2em] text-emerald-200">
+                              Live
+                            </span>
+                          ) : null}
+
+                          <span className={`rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.18em] ${health.pill}`}>
+                            {log.health}
+                          </span>
+                        </div>
+
+                        <p className="mt-3 font-mono text-[11px] text-theme-subtle">
+                          EPOCH_{log.timestamp.replace(/[:.-]/g, '').slice(-8)}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <DataBadge label="Temp" value={`${log.temperature} C`} />
+                        <DataBadge label="RPM" value={log.rpm} />
+                        <DataBadge label="Vib" value={`${log.vibration} mm/s`} />
+                        <DataBadge label="State" value={log.health} />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </Card>
 
         <Card
-          title="Data Exports"
-          subtitle="Secure JSON telemetry manifests ready for cryptographic audit."
+          title="Export Queue"
+          subtitle="Generated JSON log files available for download."
         >
           <div className="space-y-3">
             {files.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-theme-border/10 px-8 py-12 text-center text-xs text-theme-subtle uppercase tracking-widest">
-                No exports available.
+              <div className="rounded-[24px] border border-dashed border-white/10 px-6 py-12 text-center text-[11px] font-bold uppercase tracking-[0.22em] text-theme-subtle">
+                No exports available
               </div>
             ) : (
               files.map((file) => (
                 <div
                   key={file.id}
-                  className="flex flex-col gap-4 rounded-2xl border border-theme-border/5 bg-theme-surface/40 p-4 sm:flex-row sm:items-center sm:justify-between hover:bg-theme-surface/60 transition-colors"
+                  className="flex flex-col gap-4 rounded-[24px] border border-white/10 bg-white/[0.03] p-4 transition hover:bg-white/[0.05] sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="h-10 w-10 rounded-xl bg-theme-card/[0.03] flex items-center justify-center border border-theme-border/5">
-                      <svg className="w-5 h-5 text-theme-subtle" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
+                      <svg className="h-5 w-5 text-cyan-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 3h7l5 5v13a1 1 0 01-1 1H7a2 2 0 01-2-2V5a2 2 0 012-2z" />
                       </svg>
                     </div>
+
                     <div>
-                      <p className="font-mono text-[11px] text-theme-text tracking-tighter">{file.fileName}</p>
-                      <p className="mt-1 text-[10px] text-theme-subtle font-medium">
-                        TS_{formatPulseTime(file.createdAt)}
+                      <p className="font-mono text-sm text-white">{file.fileName}</p>
+                      <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-theme-subtle">
+                        {formatPulseTime(file.createdAt)}
                       </p>
                     </div>
                   </div>
@@ -562,9 +638,9 @@ function TelemetryStream({ signer, user }) {
                   <a
                     href={file.url}
                     download={file.fileName}
-                    className="inline-flex items-center justify-center rounded-xl bg-theme-card/5 border border-theme-border/5 px-5 py-2.5 text-[10px] font-bold uppercase tracking-widest text-theme-muted transition-all hover:bg-white/10 active:scale-95"
+                    className="inline-flex items-center justify-center rounded-full border border-cyan-400/20 bg-cyan-500/10 px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.22em] text-cyan-100 transition hover:bg-cyan-500/20"
                   >
-                    EXPORT
+                    Export JSON
                   </a>
                 </div>
               ))
@@ -573,6 +649,15 @@ function TelemetryStream({ signer, user }) {
         </Card>
       </div>
     </section>
+  );
+}
+
+function DataBadge({ label, value }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2">
+      <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-theme-subtle">{label}</p>
+      <p className="mt-1 text-xs font-semibold text-white">{value}</p>
+    </div>
   );
 }
 

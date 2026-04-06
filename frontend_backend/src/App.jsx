@@ -1,163 +1,326 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import IntegrityValidator from './components/IntegrityValidator';
 import TelemetryStream from './components/TelemetryStream';
-import ThemeToggle from './components/ThemeToggle';
-import { connectWallet } from './blockchain';
+// import { connectWallet } from './blockchain';
+import { connectWallet, disconnectWallet, wasWalletPreviouslyConnected } from './blockchain';
 import { auth, signInWithGoogle, logout } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
 function App() {
-  const [wallet, setWallet] = useState(null); // { address, provider, signer }
+  const [wallet, setWallet] = useState(null);
   const [user, setUser] = useState(null);
 
-  // 100% Reliable Refresh Cleanup: Triggers on every page load/mount
-  useEffect(() => {
-    async function clearLogs() {
-      try {
-        await fetch("http://localhost:3001/api/clear-logs", {
-          method: "DELETE",
-        });
-        console.log("Logs cleared on refresh");
-      } catch (err) {
-        console.error("Failed to clear logs", err);
-      }
-    }
-    clearLogs();
-  }, []);
-
-  // 1. Persist Google Account Session (Firebase)
+  // Firebase auth listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) {
-        setUser(firebaseUser);
-      } else {
-        setUser(null);
-      }
+      setUser(firebaseUser || null);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // 2. Persist Wallet Connection (localStorage)
   useEffect(() => {
-    const previouslyConnected = localStorage.getItem('connected_wallet_address');
-    if (previouslyConnected) {
-      // Re-connect silently on mount if we had a stored address
-      handleConnectWallet(true);
-    }
+    const tryReconnect = async () => {
+      if (!wasWalletPreviouslyConnected()) return;
+
+      try {
+        const result = await connectWallet({ silent: true });
+        setWallet(result);
+      } catch (err) {
+        console.error('Silent wallet reconnect failed:', err);
+        setWallet(null);
+      }
+    };
+
+    tryReconnect();
   }, []);
 
-  const handleConnectWallet = async (isAutoReconnect = false) => {
-    try {
-      const result = await connectWallet();
-      setWallet(result);
-      localStorage.setItem('connected_wallet_address', result.address);
-    } catch (err) {
-      if (!isAutoReconnect) {
-        alert(err.message);
+  // Handle MetaMask account/network changes
+  useEffect(() => {
+    if (!window.ethereum) return;
+
+    const handleAccountsChanged = async (accounts) => {
+      if (!accounts || accounts.length === 0) {
+        setWallet(null);
+        return;
       }
+
+      try {
+        const result = await connectWallet({ silent: true });
+        setWallet(result);
+      } catch (err) {
+        console.error(err);
+        setWallet(null);
+      }
+    };
+
+    const handleChainChanged = () => {
+      window.location.reload();
+    };
+
+    window.ethereum.on('accountsChanged', handleAccountsChanged);
+    window.ethereum.on('chainChanged', handleChainChanged);
+
+    return () => {
+      if (window.ethereum?.removeListener) {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
+      }
+    };
+  }, []);
+
+  // Connect Wallet (forces MetaMask account selection popup)
+  const handleConnectWallet = async () => {
+    try {
+      const result = await connectWallet({ forceAccountSelection: true });
+      setWallet(result);
+    } catch (err) {
+      alert(err.message);
     }
   };
 
+  // Disconnect wallet app-side
+  const handleDisconnectWallet = () => {
+    disconnectWallet();
+    setWallet(null);
+  };
+
+  // Google Sign-in
   const handleGoogleSignIn = async () => {
     try {
       const u = await signInWithGoogle();
       setUser(u);
     } catch (err) {
-      // Ignored for UI simplicity
+      console.error(err);
     }
   };
 
   const handleLogout = async () => {
     await logout();
     setUser(null);
-    setWallet(null);
-    localStorage.removeItem('connected_wallet_address');
   };
 
-  return (
-    <div className="relative overflow-hidden text-theme-text transition-theme min-h-screen bg-theme-base">
-      <div className="pointer-events-none absolute inset-0 bg-grid bg-[size:80px_80px] opacity-[0.15]" />
-      <div className="pointer-events-none absolute left-[-10rem] top-24 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl" />
-      <div className="pointer-events-none absolute right-[-6rem] top-[30rem] h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
+  // System status badge
+  const systemState = useMemo(() => {
+    if (wallet && user) {
+      return {
+        label: 'Operational',
+        tone: 'text-emerald-300 bg-emerald-500/10 border-emerald-400/20',
+      };
+    }
 
-      <main className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-16 px-6 py-10 sm:px-8 lg:px-12 lg:py-14">
-        <header className="rounded-[2.5rem] border border-theme-border/10 bg-theme-surface-glass/40 px-6 py-10 shadow-glow backdrop-blur-md sm:px-10 sm:py-12 transition-theme">
-          <div className="flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-3xl">
-              <p className="text-[10px] uppercase tracking-[0.4em] text-theme-accent-emerald font-bold">
-                Industrial Monitoring System
-              </p>
-              <h1 className="mt-4 text-4xl font-semibold tracking-tight text-theme-text sm:text-6xl transition-theme">
-                Telemetry Integrity Dashboard
-              </h1>
-              <p className="mt-6 max-w-2xl text-base leading-8 text-theme-muted sm:text-lg transition-theme">
-                Monitor real-time machine performance and verify the cryptographic
-                integrity of exported data samples to prevent unauthorized tampering.
-              </p>
+    if (wallet || user) {
+      return {
+        label: 'Partial',
+        tone: 'text-amber-300 bg-amber-500/10 border-amber-400/20',
+      };
+    }
+
+    return {
+      label: 'Standby',
+      tone: 'text-slate-300 bg-white/[0.04] border-white/10',
+    };
+  }, [wallet, user]);
+
+  return (
+    <div className="min-h-screen bg-theme-base text-theme-text">
+      {/* Background */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(22,163,74,0.10),transparent_28%),radial-gradient(circle_at_80%_10%,rgba(56,189,248,0.12),transparent_24%)]" />
+        <div className="absolute inset-0 bg-grid bg-[size:72px_72px] opacity-[0.08]" />
+      </div>
+
+      <main className="relative mx-auto flex min-h-screen max-w-[1500px] flex-col px-4 py-4 sm:px-6 lg:px-8">
+        {/* HEADER */}
+        <header className="sticky top-4 z-30 mb-6 rounded-[28px] border border-white/10 bg-theme-panel/70 px-5 py-4 shadow-glow backdrop-blur-xl">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            {/* LEFT */}
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-500/10">
+                <span className="text-lg font-bold text-white">CL</span>
+              </div>
+
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.4em] text-emerald-300">
+                  ChainLog
+                </p>
+                <h1 className="text-xl font-semibold text-white">
+                  Log Integrity Platform
+                </h1>
+              </div>
             </div>
 
-            <nav className="flex flex-wrap gap-4 items-center">
+            {/* RIGHT */}
+            <div className="flex flex-wrap items-center gap-3">
+              {/* STATUS */}
+              <div
+                className={`rounded-full border px-4 py-2 text-[11px] font-semibold uppercase ${systemState.tone}`}
+              >
+                {systemState.label}
+              </div>
+
+              {/* WALLET */}
               {wallet ? (
-                <div className="rounded-full border border-theme-accent-purple/20 bg-theme-accent-purple/5 px-4 py-2.5 text-sm font-semibold text-theme-accent-purple-text">
-                  Connected: {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}
-                </div>
+                <>
+                  <div className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-xs text-cyan-100">
+                    {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}
+                  </div>
+
+                  <button
+                    onClick={handleDisconnectWallet}
+                    className="rounded-full border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-100 hover:bg-rose-500/20"
+                  >
+                    Disconnect
+                  </button>
+                </>
               ) : (
                 <button
                   onClick={handleConnectWallet}
-                  className="rounded-full border border-theme-accent-purple/20 bg-theme-accent-purple/10 px-5 py-3 text-sm font-semibold text-theme-accent-purple-text transition hover:bg-theme-accent-purple/20"
+                  className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-xs text-cyan-100 hover:bg-cyan-500/20"
                 >
                   Connect Wallet
                 </button>
               )}
 
+              {/* USER */}
               {user ? (
-                <div className="flex items-center gap-2 rounded-full border border-theme-accent-blue/20 bg-theme-accent-blue/5 px-4 py-2 text-sm font-semibold text-theme-accent-blue-text">
-                  {user.photoURL && <img src={user.photoURL} alt="Avatar" className="w-6 h-6 rounded-full" />}
-                  <div className="flex flex-col">
-                    <span>{user.displayName}</span>
-                    <span className="text-[10px] font-mono text-theme-accent-blue opacity-80 truncate max-w-[160px]">{user.email}</span>
-                  </div>
-                  <button onClick={handleLogout} className="ml-2 text-xs text-theme-muted hover:text-theme-text">Logout</button>
+                <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-xs">
+                  <span className="text-white">{user.email}</span>
+
+                  <button
+                    onClick={handleLogout}
+                    className="text-[10px] text-theme-muted hover:text-white"
+                  >
+                    Logout
+                  </button>
                 </div>
               ) : (
                 <button
                   onClick={handleGoogleSignIn}
-                  className="rounded-full border border-theme-accent-blue/20 bg-theme-accent-blue/10 px-5 py-3 text-sm font-semibold text-theme-accent-blue-text transition hover:bg-theme-accent-blue/20"
+                  className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100 hover:bg-emerald-500/20"
                 >
-                  Google Sign-in
+                  Sign In
                 </button>
               )}
-
-              <a
-                href="#telemetry"
-                className="rounded-full border border-theme-accent-emerald/20 bg-theme-accent-emerald/5 px-6 py-3.5 text-sm font-semibold text-theme-accent-emerald-text transition hover:bg-theme-accent-emerald/15"
-              >
-                Live Feed
-              </a>
-              <a
-                href="#validator"
-                className="rounded-full border border-theme-accent-cyan/20 bg-theme-accent-cyan/5 px-6 py-3.5 text-sm font-semibold text-theme-accent-cyan-text transition hover:bg-theme-accent-cyan/15"
-              >
-                Integrity Tool
-              </a>
-              <ThemeToggle />
-            </nav>
+            </div>
           </div>
         </header>
 
-        {/* Live Simulation Section */}
-        <TelemetryStream signer={wallet?.signer} user={user} />
+        {/* HERO SECTION */}
+        <section className="mb-8 overflow-hidden rounded-[36px] border border-white/10 bg-theme-panel/75 p-6 shadow-glow backdrop-blur-xl sm:p-8 lg:p-10">
+          <div className="grid gap-8 xl:grid-cols-[1.15fr_0.85fr]">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.28em] text-emerald-200">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(74,222,128,0.8)]" />
+                Blockchain-backed monitoring
+              </div>
 
-        {/* Integrity Check Section — now uses signer for on-chain record lookup */}
+              <h2 className="mt-6 max-w-4xl text-4xl font-semibold leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
+                Immutable machine logs
+                <span className="block bg-gradient-to-r from-white via-cyan-100 to-emerald-200 bg-clip-text text-transparent">
+                  with real-time validation
+                </span>
+              </h2>
+
+              <p className="mt-6 max-w-3xl text-base leading-8 text-theme-muted sm:text-lg">
+                Generate telemetry records, store trusted references on-chain,
+                and validate exported files through a single operational
+                workspace.
+              </p>
+
+              <div className="mt-8 flex flex-wrap gap-3">
+                <a
+                  href="#telemetry"
+                  className="rounded-full border border-white/10 bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:opacity-90"
+                >
+                  Open Telemetry
+                </a>
+                <a
+                  href="#validator"
+                  className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-6 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
+                >
+                  Open Validator
+                </a>
+              </div>
+
+              <div className="mt-10 grid gap-4 sm:grid-cols-3">
+                <StatTile
+                  value="10s"
+                  label="Sync Cycle"
+                  helper="Continuous packet generation for machine log monitoring."
+                />
+                <StatTile
+                  value="JSON"
+                  label="Log Export"
+                  helper="Structured machine records prepared for storage and verification."
+                />
+                <StatTile
+                  value="Web3"
+                  label="Proof Layer"
+                  helper="Trusted on-chain reference for integrity validation."
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4">
+              <FeatureCard
+                eyebrow="Live Monitoring"
+                title="Telemetry Stream"
+                text="Track current machine state, health condition, exports, and recent activity from a single dashboard."
+              />
+              <FeatureCard
+                eyebrow="Data Integrity"
+                title="Blockchain Verification"
+                text="Compare exported log files against recorded on-chain hashes to confirm authenticity."
+              />
+              <FeatureCard
+                eyebrow="Operational Control"
+                title="Secure Workflow"
+                text="Connect wallet, sign in, export machine logs, and validate results with full traceability."
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* MAIN FEATURES */}
+        <TelemetryStream signer={wallet?.signer} user={user} />
         <IntegrityValidator signer={wallet?.signer} user={user} />
 
-        <footer className="mt-auto py-10 border-t border-theme-border/5 text-center transition-theme">
-          <p className="text-xs text-theme-subtle tracking-widest uppercase font-mono transition-theme">
-            System Status: Nominal // Data Pipeline Active
+        {/* FOOTER */}
+        <footer className="mt-10 rounded-[28px] border border-white/10 bg-theme-panel/70 px-6 py-5 text-center shadow-glow">
+          <p className="text-[11px] uppercase tracking-[0.3em] text-theme-subtle">
+            ChainLog • Monitor • Verify • Secure
           </p>
         </footer>
       </main>
+    </div>
+  );
+}
+
+function StatTile({ value, label, helper }) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+      <div className="text-3xl font-semibold tracking-tight text-white">
+        {value}
+      </div>
+      <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.22em] text-theme-subtle">
+        {label}
+      </p>
+      <p className="mt-3 text-sm leading-6 text-theme-muted">{helper}</p>
+    </div>
+  );
+}
+
+function FeatureCard({ eyebrow, title, text }) {
+  return (
+    <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <p className="text-[10px] font-bold uppercase tracking-[0.32em] text-cyan-200/80">
+        {eyebrow}
+      </p>
+      <h3 className="mt-3 text-xl font-semibold tracking-tight text-white">
+        {title}
+      </h3>
+      <p className="mt-3 text-sm leading-7 text-theme-muted">{text}</p>
     </div>
   );
 }

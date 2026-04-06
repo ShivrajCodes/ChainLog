@@ -1,18 +1,25 @@
 function Card({ title, subtitle, children, className = '' }) {
   return (
     <section
-      className={`rounded-3xl border border-theme-border/10 bg-theme-card/5 p-6 shadow-glow backdrop-blur-sm transition duration-300 hover:border-theme-border/20 hover:bg-theme-card/[0.07] ${className}`}
+      className={`relative overflow-hidden rounded-[30px] border border-white/10 bg-theme-panel/75 p-6 shadow-glow backdrop-blur-xl transition duration-300 hover:border-white/15 ${className}`}
     >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+
       {(title || subtitle) && (
-        <header className="mb-5">
+        <header className="mb-6">
           {title ? (
-            <h3 className="text-lg font-semibold tracking-wide text-theme-text">{title}</h3>
+            <h3 className="text-xl font-semibold tracking-tight text-theme-text">
+              {title}
+            </h3>
           ) : null}
           {subtitle ? (
-            <p className="mt-1 text-sm leading-6 text-theme-muted">{subtitle}</p>
+            <p className="mt-2 max-w-3xl text-sm leading-7 text-theme-muted">
+              {subtitle}
+            </p>
           ) : null}
         </header>
       )}
+
       {children}
     </section>
   );
